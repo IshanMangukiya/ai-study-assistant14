@@ -1,80 +1,78 @@
 # week4.py
+
 import streamlit as st
-from dotenv import load_dotenv
 import os
 from openai import OpenAI
 from PyPDF2 import PdfReader
 from annoy import AnnoyIndex
 
-# -------------------------
-# Load API Key securely
-# -------------------------
-load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
+# --------------------------
+# Load OpenAI API key
+# --------------------------
+if "OPENAI_API_KEY" in st.secrets:
+    # Running on Streamlit Cloud
+    api_key = st.secrets["OPENAI_API_KEY"]
+else:
+    # Local testing
+    from dotenv import load_dotenv
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")
+
 client = OpenAI(api_key=api_key)
 
-# -------------------------
-# Streamlit UI
-# -------------------------
+# --------------------------
+# Streamlit Interface
+# --------------------------
 st.title("AI Study Assistant 🤖")
-st.write("Upload a PDF and ask questions about its content!")
 
-# Upload PDF
-pdf_file = st.file_uploader("Upload PDF", type=["pdf"])
+st.write("You can ask questions directly or upload a PDF and ask questions from it.")
 
-# Initialize variables
+# File uploader
+uploaded_file = st.file_uploader("Upload a PDF (optional)", type=["pdf"])
+
+# Text input
+user_question = st.text_input("Ask a study question:")
+
+# --------------------------
+# Process PDF if uploaded
+# --------------------------
 pdf_text = ""
-vector_index = None
-vector_dim = 1536  # OpenAI embedding size
-
-# -------------------------
-# Process PDF
-# -------------------------
-if pdf_file:
-    reader = PdfReader(pdf_file)
+if uploaded_file is not None:
+    reader = PdfReader(uploaded_file)
     for page in reader.pages:
         pdf_text += page.extract_text() + "\n"
-    
-    st.success("PDF loaded successfully! ✅")
+    st.success("PDF uploaded successfully!")
 
-    # Create Annoy index (example: simple split by sentences)
-    sentences = pdf_text.split(". ")
-    vector_index = AnnoyIndex(vector_dim, 'angular')
+# --------------------------
+# Search/Answer Function
+# --------------------------
+def ask_question(question, context=""):
+    messages = []
+    if context:
+        messages.append({"role": "system", "content": f"Use this context: {context}"})
+    messages.append({"role": "user", "content": question})
 
-    # Create embeddings for each sentence
-    for i, sentence in enumerate(sentences):
-        if sentence.strip() == "":
-            continue
-        response = client.embeddings.create(
-            model="text-embedding-3-small",
-            input=sentence
-        )
-        embedding_vector = response.data[0].embedding
-        vector_index.add_item(i, embedding_vector)
-    
-    vector_index.build(10)  # Number of trees
-    st.info("PDF embeddings ready! You can now search.")
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=messages,
+        temperature=0.7
+    )
+    answer = response.choices[0].message.content
+    return answer
 
-# -------------------------
-# Search Bar
-# -------------------------
-user_query = st.text_input("Ask a question about the PDF:")
-
-if st.button("Search") and user_query:
-    if pdf_file:
-        # Embed the user query
-        query_embedding = client.embeddings.create(
-            model="text-embedding-3-small",
-            input=user_query
-        ).data[0].embedding
-
-        # Find top 3 similar sentences
-        top_k = vector_index.get_nns_by_vector(query_embedding, 3)
-        st.subheader("Top related content:")
-        for idx in top_k:
-            st.write(sentences[idx])
+# --------------------------
+# Button to ask
+# --------------------------
+if st.button("Ask"):
+    if user_question.strip() == "":
+        st.warning("Please enter a question!")
     else:
-        st.warning("Please upload a PDF first!")
+        # If PDF uploaded, use its content as context
+        answer = ask_question(user_question, pdf_text)
+        st.subheader("Answer:")
+        st.write(answer)
+
+
 
 
 
