@@ -7,24 +7,32 @@ from PyPDF2 import PdfReader
 from annoy import AnnoyIndex
 
 # --------------------------
-# Load OpenAI API key
+# Load OpenAI API Key
 # --------------------------
+api_key = None
+
+# 1️⃣ Use Streamlit Secrets if available (Cloud)
 if "OPENAI_API_KEY" in st.secrets:
-    # Running on Streamlit Cloud
     api_key = st.secrets["OPENAI_API_KEY"]
 else:
-    # Local testing
-    from dotenv import load_dotenv
-    load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
+    # 2️⃣ Use local .env if running locally
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        api_key = os.getenv("OPENAI_API_KEY")
+    except ModuleNotFoundError:
+        pass
 
-client = OpenAI(api_key=api_key)
+# 3️⃣ Error if no key found
+if api_key is None:
+    st.error("OpenAI API key not found! Set it in .env (local) or Secrets (Streamlit Cloud).")
+else:
+    client = OpenAI(api_key=api_key)
 
 # --------------------------
-# Streamlit Interface
+# Streamlit UI
 # --------------------------
 st.title("AI Study Assistant 🤖")
-
 st.write("You can ask questions directly or upload a PDF and ask questions from it.")
 
 # File uploader
@@ -34,7 +42,7 @@ uploaded_file = st.file_uploader("Upload a PDF (optional)", type=["pdf"])
 user_question = st.text_input("Ask a study question:")
 
 # --------------------------
-# Process PDF if uploaded
+# Process PDF
 # --------------------------
 pdf_text = ""
 if uploaded_file is not None:
@@ -44,7 +52,7 @@ if uploaded_file is not None:
     st.success("PDF uploaded successfully!")
 
 # --------------------------
-# Search/Answer Function
+# Question Answering Function
 # --------------------------
 def ask_question(question, context=""):
     messages = []
@@ -61,16 +69,16 @@ def ask_question(question, context=""):
     return answer
 
 # --------------------------
-# Button to ask
+# Ask button
 # --------------------------
 if st.button("Ask"):
     if user_question.strip() == "":
         st.warning("Please enter a question!")
     else:
-        # If PDF uploaded, use its content as context
         answer = ask_question(user_question, pdf_text)
         st.subheader("Answer:")
         st.write(answer)
+
 
 
 
