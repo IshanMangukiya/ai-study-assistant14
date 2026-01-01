@@ -1,65 +1,114 @@
 import streamlit as st
 import os
-import openai
+import numpy as np
+from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 from annoy import AnnoyIndex
+from openai import OpenAI
 
-# --------------------------
-# Load API Key
-# --------------------------
-api_key = None
+# Load env (local only)
+load_dotenv()
 
-if "OPENAI_API_KEY" in st.secrets:
-    api_key = st.secrets["OPENAI_API_KEY"]
-else:
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-        api_key = os.getenv("OPENAI_API_KEY")
-    except ModuleNotFoundError:
-        pass
+# OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-if api_key is None:
-    st.error("OpenAI API key not found!")
-else:
-    openai.api_key = api_key
+st.set_page_config(page_title="AI Study Assistant", layout="wide")
 
-# --------------------------
-# Streamlit UI
-# --------------------------
-st.title("AI Study Assistant 🤖")
-st.write("You can ask questions directly or upload a PDF and ask questions from it.")
+st.title("📘 AI Study Assistant – Final Version")
 
-uploaded_file = st.file_uploader("Upload a PDF (optional)", type=["pdf"])
-user_question = st.text_input("Ask a study question:")
+# -------------------------
+# Session State
+# -------------------------
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# -------------------------
+# Sidebar – PDF Upload
+# -------------------------
+st.sidebar.header("📂 Upload Study PDF (Optional)")
+pdf_file = st.sidebar.file_uploader("Upload PDF", type="pdf")
 
 pdf_text = ""
-if uploaded_file is not None:
-    reader = PdfReader(uploaded_file)
+
+if pdf_file:
+    reader = PdfReader(pdf_file)
     for page in reader.pages:
-        pdf_text += page.extract_text() + "\n"
-    st.success("PDF uploaded successfully!")
+        pdf_text += page.extract_text()
 
-def ask_question(question, context=""):
-    messages = []
-    if context:
-        messages.append({"role": "system", "content": f"Use this context: {context}"})
-    messages.append({"role": "user", "content": question})
+    st.sidebar.success("PDF loaded successfully ✅")
 
-    response = openai.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=messages,
-        temperature=0.7
+# -------------------------
+# Create Embeddings
+# -------------------------
+def get_embedding(text):
+    response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
     )
-    return response.choices[0].message.content
+    return response.data[0].embedding
 
-if st.button("Ask"):
-    if user_question.strip() == "":
-        st.warning("Please enter a question!")
+annoy_index = None
+chunks = []
+
+if pdf_text:
+    chunks = [pdf_text[i:i+500] for i in range(0, len(pdf_text), 500)]
+    annoy_index = AnnoyIndex(1536, "angular")
+
+    for i, chunk in enumerate(chunks):
+        emb = get_embedding(chunk)
+        annoy_index.add_item(i, emb)
+
+    annoy_index.build(10)
+
+# -------------------------
+# Main Question Input
+# -------------------------
+question = st.text_input("❓ Ask your question")
+
+if st.button("Ask AI"):
+    if not question:
+        st.warning("Please enter a question")
     else:
-        answer = ask_question(user_question, pdf_text)
-        st.subheader("Answer:")
+        context = ""
+
+        if annoy_index:
+            q_emb = get_embedding(question)
+            ids = annoy_index.get_nns_by_vector(q_emb, 3)
+            context = " ".join([chunks[i] for i in ids])
+
+        prompt = f"""
+You are a helpful study assistant.
+
+Context (if any):
+{context}
+
+Question:
+{question}
+"""
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        answer = response.choices[0].message.content
+
+        st.session_state.history.append((question, answer))
+
+        st.success("Answer generated ✅")
         st.write(answer)
+
+# -------------------------
+# History Section
+# -------------------------
+st.divider()
+st.subheader("🕘 Question History")
+
+for q, a in reversed(st.session_state.history):
+    with st.expander(q):
+        st.write(a)
+
+
 
 
 
